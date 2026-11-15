@@ -94,12 +94,6 @@ api.get("/", async (_req, res) => {
   res.json(ok(await productdb.getAll()));
 });
 
-// TODO: implement. Probably wants requireRole("user") and a body schema
-// (e.g. items: [{ productId, quantity }]).
-api.post("/purchase", (_req, res) => {
-  res.status(501).json({ message: "Not implemented" });
-});
-
 export default api;
 
 /* ------------------------------ Usage (app.ts) ------------------------------ */

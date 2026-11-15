@@ -1,6 +1,7 @@
 import { Type as t, type Static } from "@sinclair/typebox";
 import { defineTable, col } from "./Database.ts";
 import { DBError } from "./core.ts";
+import { productdb } from "./productdb.ts";
 import {
   transactionItemdb,
   type BaseTransactionItem,
@@ -38,6 +39,19 @@ const transactionTable = defineTable(
 
       try {
         await client.query("BEGIN");
+
+        // Decrement stock first. Each UPDATE is conditional (stock >= quantity), so
+        // if any line can't be fulfilled we throw and the ROLLBACK below undoes the
+        // lines that already succeeded. Rows are locked in productId order so two
+        // concurrent orders with overlapping products can't deadlock each other.
+        const byProduct = [...items].sort((a, b) => a.productId - b.productId);
+
+        for (const { productId, quantity } of byProduct) {
+          const ok = await productdb.decrementStock(productId, quantity, {
+            client,
+          });
+          if (!ok) throw DBError.DatabaseError;
+        }
 
         const transaction = await base.create({ buyerId, total }, { client });
         if (transaction instanceof DBError) throw transaction;

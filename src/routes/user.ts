@@ -124,31 +124,48 @@ api.post(
   async (req, res) => {
     const body = req.body as Static<typeof createTransactionBody>;
 
-    const items = await Promise.all(
-      body.items.map(async ({ productId, quantity }) => {
-        const product = await productdb.getBy("id", productId);
+    // Merge duplicate lines (same productId twice) so the stock check below is correct.
+    const wanted = new Map<number, number>();
+    for (const { productId, quantity } of body.items) {
+      wanted.set(productId, (wanted.get(productId) ?? 0) + quantity);
+    }
 
-        if (!product) return null;
-
-        return { productId, quantity, price: product.price };
-      }),
+    const products = await Promise.all(
+      [...wanted.keys()].map((id) => productdb.getBy("id", id)),
     );
 
-    if (items.some((item) => item === null)) {
+    if (products.some((p) => !p)) {
       return res.status(400).json({ message: "Invalid product" });
     }
 
-    const validItems = items.filter(
-      (item): item is NonNullable<typeof item> => item !== null,
-    );
+    const items = [...wanted].map(([productId, quantity], i) => ({
+      productId,
+      quantity,
+      price: products[i]!.price,
+    }));
+
+    // Fast-fail check. This is NOT race-safe on its own: two buyers can both pass it.
+    // The real guard is the conditional decrement inside transactiondb.create (see notes).
+    const insufficient = items
+      .filter((item, i) => products[i]!.stock < item.quantity)
+      .map((item) => item.productId);
+
+    if (insufficient.length > 0) {
+      return res
+        .status(409)
+        .json({ message: "Insufficient stock", data: insufficient });
+    }
 
     const created = await transactiondb.create({
       buyerId: req.user!.id,
-      items: validItems,
+      items,
     });
 
     if (created instanceof DBError) {
-      return res.status(500).json(Errors.createTransactionFailed);
+      // Lost a race: another order took the stock after the pre-check above.
+      return created.code === "DATABASE_ERROR"
+        ? res.status(409).json({ message: "Insufficient stock" })
+        : res.status(500).json(Errors.createTransactionFailed);
     }
 
     res.status(201).json({ message: "OK", data: created });

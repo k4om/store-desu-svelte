@@ -1,18 +1,19 @@
 <script lang="ts">
-  import { apiState, productsQuery } from "$lib/api.svelte";
+  import { api, apiState, query } from "$lib/api.svelte";
   import { routes } from "$lib/routes.svelte";
   import { link } from "@milizt/runeway";
   import Button from "$lib/components/input/Button.svelte";
 
   const productId = $derived(routes.match ? Number((routes.match.params as { id: string }).id) : 0);
-  const product = $derived(apiState.products.find((p) => p.id === productId));
+  const productQuery = query(() => api.product({ id: productId }).get());
+  const product = $derived(productQuery.data?.data);
 
   const category = $derived(
     apiState.categories.find((c) => c.id === product?.categoryId),
   );
 
   let quantity = $state(1);
-  let added = $state(false);
+  let purchased = $state(false);
 
   const formatPrice = (price: number) =>
     new Intl.NumberFormat("id-ID", {
@@ -21,15 +22,14 @@
       maximumFractionDigits: 0,
     }).format(price);
 
-  function addToCart() {
+  async function purchase() {
     if (!product || product.stock <= 0) return;
 
-    console.log({
-      productId: product.id,
-      quantity,
-    });
+    await api.me.transaction.post({ items: [{ productId: product.id, quantity } ]})
+    productQuery.reload()
 
-    added = true;
+    purchased = true;
+    setTimeout(() => purchased = false, 1000);
   }
 </script>
 
@@ -41,7 +41,7 @@
 
 <main>
   <div class="product-container">
-    {#if productsQuery.loading}
+    {#if productQuery.loading && !product}
       <div class="panel message">Loading product...</div>
     {:else if !product}
       <div class="panel message">
@@ -117,8 +117,8 @@
               </div>
 
               <div class="cart-action">
-                <Button variant="primary" onclick={addToCart}>
-                  {added ? "Added ✓" : "Add to cart"}
+                <Button variant="primary" onclick={purchase}>
+                  {purchased ? "Purchased ✓" : "Buy"}
                 </Button>
               </div>
             </div>
