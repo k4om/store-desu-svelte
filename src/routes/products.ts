@@ -1,7 +1,9 @@
-import Elysia, { t } from "elysia";
+import { Router } from "express";
+import { Type as t } from "@sinclair/typebox";
 
 import { productdb } from "../db/productdb.ts";
-import { roleBasedAccessLimiter } from "../auth.ts";
+import { requireRole } from "../auth.ts";
+import { validate } from "../validate.ts";
 import { DBError } from "../db/core.ts";
 
 const Errors = {
@@ -23,67 +25,82 @@ const productBody = t.Object({
 
 const ok = (data?: unknown) => ({ message: "OK", data });
 
-const api = new Elysia({ prefix: "/product" })
-  .use(roleBasedAccessLimiter)
-  .post(
-    "/",
-    async ({ body, status }) => {
-      const created = await productdb.create(body);
+const api = Router();
 
-      if (created instanceof DBError) {
-        return created.code === "ALREADY_EXISTS"
-          ? status(409, Errors.nameTaken)
-          : status(500, Errors.saveFailed);
+api.post(
+  "/",
+  requireRole("admin"),
+  validate({ body: productBody }),
+  async (req, res) => {
+    const created = await productdb.create(req.body);
+
+    if (created instanceof DBError) {
+      return created.code === "ALREADY_EXISTS"
+        ? res.status(409).json(Errors.nameTaken)
+        : res.status(500).json(Errors.saveFailed);
+    }
+
+    res.json(ok(created));
+  },
+);
+
+api.put(
+  "/:id",
+  requireRole("admin"),
+  validate({ params: idParams, body: productBody }),
+  async (req, res) => {
+    const updated = await productdb.update({
+      ...req.body,
+      id: Number(req.params.id),
+    });
+
+    if (updated instanceof DBError) {
+      switch (updated.code) {
+        case "NOT_FOUND":
+          return res.status(404).json(Errors.notFound);
+        case "ALREADY_EXISTS":
+          return res.status(409).json(Errors.nameTaken);
+        default:
+          return res.status(500).json(Errors.saveFailed);
       }
+    }
 
-      return ok(created);
-    },
-    { role: "admin", body: productBody },
-  )
-  .put(
-    "/:id",
-    async ({ body, params, status }) => {
-      const updated = await productdb.update({ ...body, id: params.id });
+    res.json(ok(updated));
+  },
+);
 
-      if (updated instanceof DBError) {
-        switch (updated.code) {
-          case "NOT_FOUND":
-            return status(404, Errors.notFound);
-          case "ALREADY_EXISTS":
-            return status(409, Errors.nameTaken);
-          default:
-            return status(500, Errors.saveFailed);
-        }
-      }
+api.delete(
+  "/:id",
+  requireRole("admin"),
+  validate({ params: idParams }),
+  async (req, res) => {
+    const original = await productdb.getBy("id", Number(req.params.id));
+    if (!original) return res.status(404).json(Errors.notFound);
 
-      return ok(updated);
-    },
-    { role: "admin", body: productBody, params: idParams },
-  )
-  .delete(
-    "/:id",
-    async ({ params, status }) => {
-      const original = await productdb.getBy("id", params.id);
-      if (!original) return status(404, Errors.notFound);
+    await productdb.delete(original.id);
+    res.json(ok());
+  },
+);
 
-      await productdb.delete(original.id);
-      return ok();
-    },
-    { role: "admin", params: idParams },
-  )
-  .get(
-    "/:id",
-    async ({ params, status }) => {
-      const data = await productdb.getBy("id", params.id);
-      if (!data) return status(404, Errors.notFound);
+// Public routes (no role check, same as the Elysia version).
+api.get("/:id", validate({ params: idParams }), async (req, res) => {
+  const data = await productdb.getBy("id", Number(req.params.id));
+  if (!data) return res.status(404).json(Errors.notFound);
 
-      return ok(data);
-    },
-    { params: idParams },
-  )
-  .get("/", async () => ok(await productdb.getAll()))
-  .post("/purchase", async () => {
-    
-  });
+  res.json(ok(data));
+});
+
+api.get("/", async (_req, res) => {
+  res.json(ok(await productdb.getAll()));
+});
+
+// TODO: implement. Probably wants requireRole("user") and a body schema
+// (e.g. items: [{ productId, quantity }]).
+api.post("/purchase", (_req, res) => {
+  res.status(501).json({ message: "Not implemented" });
+});
 
 export default api;
+
+/* ------------------------------ Usage (app.ts) ------------------------------ */
+// app.use("/product", productRoutes);

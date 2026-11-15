@@ -1,13 +1,16 @@
-import Elysia, { t } from "elysia";
+import { Router } from "express";
+import { Type as t, type Static } from "@sinclair/typebox";
 
 import { userdb } from "../db/userdb.ts";
 import { transactiondb } from "../db/transactiondb.ts";
-import { userJWT } from "../jwt.ts";
-import { authCookie, roleBasedAccessLimiter, Unauthorized } from "../auth.ts";
+import { requireRole } from "../auth.ts";
+import { validate } from "../validate.ts";
 import { DBError } from "../db/core.ts";
-import { productdb } from "$server/db/productdb.ts";
-import { categorydb } from "$server/db/categorydb.ts";
-import { transactionItemdb } from "$server/db/transactionitemdb.ts";
+import { productdb } from "../db/productdb.ts";
+import { categorydb } from "../db/categorydb.ts";
+import { transactionItemdb } from "../db/transactionitemdb.ts";
+
+/* ---------------------------------- Schemas --------------------------------- */
 
 const Id = t.Integer({ minimum: 1 });
 const idParams = t.Object({ id: Id });
@@ -26,6 +29,8 @@ const Errors = {
   notFound: { message: "User not found" },
 } as const;
 
+/* --------------------------------- Helpers ---------------------------------- */
+
 const toPublicUser = (user: Awaited<ReturnType<typeof userdb.getBy>>) => {
   if (!user) return null;
 
@@ -33,198 +38,183 @@ const toPublicUser = (user: Awaited<ReturnType<typeof userdb.getBy>>) => {
   return { id, email, firstName, lastName, role };
 };
 
-const api = new Elysia({ prefix: "/admin" })
-  .use(userJWT)
-  .use(roleBasedAccessLimiter)
-  .get(
-    "/account",
-    async () => {
-      const users = await userdb.getAll({ sort: { by: "id" } });
+/* ---------------------------------- Router ---------------------------------- */
 
-      return {
-        message: "OK",
-        data: users.map((user) => toPublicUser(user)),
-      };
-    },
-    { role: "admin" },
-  )
-  .get(
-    "/account/:id",
-    async ({ params, status }) => {
-      const user = await userdb.getBy("id", params.id);
+const api = Router();
 
-      if (!user) return status(404, Errors.notFound);
+// Every route in this router is admin-only.
+// requireRole must verify the JWT cookie and check the role (see notes).
+api.use(requireRole("admin"));
 
-      return {
-        message: "OK",
-        data: toPublicUser(user),
-      };
-    },
-    { role: "admin", params: idParams },
-  )
-  .put(
-    "/account/:id",
-    async ({ params, body, status }) => {
-      const existing = await userdb.getBy("id", params.id);
+api.get("/account", async (_req, res) => {
+  const users = await userdb.getAll({ sort: { by: "id" } });
 
-      if (!existing) return status(404, Errors.notFound);
+  res.json({
+    message: "OK",
+    data: users.map((user) => toPublicUser(user)),
+  });
+});
 
-      const email = body.email?.trim().toLowerCase();
+api.get(
+  "/account/:id",
+  validate({ params: idParams }),
+  async (req, res) => {
+    const id = Number(req.params.id);
+    const user = await userdb.getBy("id", id);
 
-      if (email) {
-        const emailOwner = await userdb.getBy("email", email);
+    if (!user) return res.status(404).json(Errors.notFound);
 
-        if (emailOwner && emailOwner.id !== params.id) {
-          return status(409, Errors.emailTaken);
-        }
+    res.json({
+      message: "OK",
+      data: toPublicUser(user),
+    });
+  },
+);
+
+api.put(
+  "/account/:id",
+  validate({ params: idParams, body: updateAccountBody }),
+  async (req, res) => {
+    const id = Number(req.params.id);
+    const body = req.body as Static<typeof updateAccountBody>;
+
+    const existing = await userdb.getBy("id", id);
+
+    if (!existing) return res.status(404).json(Errors.notFound);
+
+    const email = body.email?.trim().toLowerCase();
+
+    if (email) {
+      const emailOwner = await userdb.getBy("email", email);
+
+      if (emailOwner && emailOwner.id !== id) {
+        return res.status(409).json(Errors.emailTaken);
+      }
+    }
+
+    const updated = await userdb.update({
+      id,
+      ...(email !== undefined && { email }),
+      ...(body.firstName !== undefined && {
+        firstName: body.firstName.trim(),
+      }),
+      ...(body.lastName !== undefined && {
+        lastName: body.lastName.trim(),
+      }),
+      ...(body.role !== undefined && { role: body.role }),
+    });
+
+    if (updated instanceof DBError) {
+      if (updated.code === "ALREADY_EXISTS") {
+        return res.status(409).json(Errors.emailTaken);
       }
 
-      const updated = await userdb.update({
-        id: params.id,
-        ...(email !== undefined && { email }),
-        ...(body.firstName !== undefined && {
-          firstName: body.firstName.trim(),
-        }),
-        ...(body.lastName !== undefined && {
-          lastName: body.lastName.trim(),
-        }),
-        ...(body.role !== undefined && { role: body.role }),
-      });
+      return res.status(500).json(Errors.updateFailed);
+    }
 
-      if (updated instanceof DBError) {
-        if (updated.code === "ALREADY_EXISTS") {
-          return status(409, Errors.emailTaken);
-        }
+    res.json({
+      message: "OK",
+      data: toPublicUser(updated),
+    });
+  },
+);
 
-        return status(500, Errors.updateFailed);
-      }
+api.delete(
+  "/account/:id",
+  validate({ params: idParams }),
+  async (req, res) => {
+    const deleted = await userdb.delete(Number(req.params.id));
 
-      return {
-        message: "OK",
-        data: toPublicUser(updated),
-      };
+    if (!deleted) return res.status(404).json(Errors.notFound);
+
+    res.json({ message: "OK" });
+  },
+);
+
+api.get(
+  "/account/:id/transaction",
+  validate({ params: idParams }),
+  async (req, res) => {
+    const id = Number(req.params.id);
+    const user = await userdb.getBy("id", id);
+
+    if (!user) return res.status(404).json(Errors.notFound);
+
+    res.json({
+      message: "OK",
+      data: await transactiondb.wrapMany(
+        await transactiondb.getAllBy("id", id),
+      ),
+    });
+  },
+);
+
+api.get("/stats", async (_req, res) => {
+  const [userCount, productCount, categoryCount, transactionCount, revenue] =
+    await Promise.all([
+      userdb.count("id"),
+      productdb.count("id"),
+      categorydb.count("id"),
+      transactiondb.count("id"),
+      transactiondb.sum("total"),
+    ]);
+
+  res.json({
+    message: "OK",
+    data: {
+      userCount,
+      productCount,
+      categoryCount,
+      transactionCount,
+      revenue,
     },
-    {
-      role: "admin",
-      params: idParams,
-      body: updateAccountBody,
-    },
-  )
-  .delete(
-    "/account/:id",
-    async ({ params, status }) => {
-      const deleted = await userdb.delete(params.id);
+  });
+});
 
-      if (!deleted) return status(404, Errors.notFound);
+api.get("/report", async (_req, res) => {
+  const [transactions, revenue, itemsSold, customers] = await Promise.all([
+    transactiondb.count("id"),
+    transactiondb.sum("total"),
+    transactionItemdb.sum("quantity"),
+    transactiondb.count("buyerId", { distinct: true }),
+  ]);
 
-      return { message: "OK" };
-    },
-    { role: "admin", params: idParams },
-  )
-  .get(
-    "/account/:id/transaction",
-    async ({ params, status }) => {
-      const user = await userdb.getBy("id", params.id);
+  res.json({
+    message: "OK",
+    data: { transactions, revenue, itemsSold, customers },
+  });
+});
 
-      if (!user) return status(404, Errors.notFound);
-
-      return {
-        message: "OK",
-        data: await transactiondb.wrapMany(
-          await transactiondb.getAllBy("id", params.id),
-        ),
-      };
-    },
-    { role: "admin", params: idParams },
-  )
-  .get(
-    "/stats",
-    async () => {
-      const [
-        userCount,
-        productCount,
-        categoryCount,
-        transactionCount,
-        revenue,
-      ] = await Promise.all([
-        userdb.count("id"),
-        productdb.count("id"),
-        categorydb.count("id"),
-        transactiondb.count("id"),
-        transactiondb.sum("total"),
-      ]);
-
-      return {
-        message: "OK",
-        data: {
-          userCount,
-          productCount,
-          categoryCount,
-          transactionCount,
-          revenue,
-        },
-      };
-    },
-    { role: "admin", cookie: authCookie },
-  )
-  .get(
-    "/report",
-    async () => {
-      const [transactions, revenue, itemsSold, customers] = await Promise.all([
-        transactiondb.count("id"),
-        transactiondb.sum("total"),
-        transactionItemdb.sum("quantity"),
-        transactiondb.count("buyerId", { distinct: true }),
-      ]);
-
-      return {
-        message: "OK",
-        data: {
-          transactions,
-          revenue,
-          itemsSold,
-          customers,
-        },
-      };
-    },
-    { role: "admin", cookie: authCookie },
-  )
-  .get(
-    "/global-transaction/recent",
-    async () => {
-      const [recentTransactions] = await Promise.all([
-        transactiondb.wrapMany(
-          await transactiondb.getAll({
-            sort: { by: "id", order: "DESC" },
-            limit: 10,
-          }),
-        ),
-      ]);
-
-      return {
-        message: "OK",
-        data: recentTransactions,
-      };
-    },
-    { role: "admin", cookie: authCookie },
-  )
-  .get(
-    "/global-transaction/all",
-    async () => {
-      const [allTransactions] = await Promise.all([
-        transactiondb.wrapMany(
-          await transactiondb.getAll({
-            sort: { by: "id", order: "DESC" },
-          }),
-        ),
-      ]);
-
-      return {
-        message: "OK",
-        data: allTransactions,
-      };
-    },
-    { role: "admin", cookie: authCookie },
+api.get("/global-transaction/recent", async (_req, res) => {
+  const recentTransactions = await transactiondb.wrapMany(
+    await transactiondb.getAll({
+      sort: { by: "id", order: "DESC" },
+      limit: 10,
+    }),
   );
 
+  res.json({ message: "OK", data: recentTransactions });
+});
+
+api.get("/global-transaction/all", async (_req, res) => {
+  const allTransactions = await transactiondb.wrapMany(
+    await transactiondb.getAll({
+      sort: { by: "id", order: "DESC" },
+    }),
+  );
+
+  res.json({ message: "OK", data: allTransactions });
+});
+
 export default api;
+
+/* ------------------------------ Usage (app.ts) ------------------------------ */
+// import express from "express";
+// import cookieParser from "cookie-parser";
+// import admin from "./routes/admin.ts";
+//
+// const app = express();
+// app.use(express.json());
+// app.use(cookieParser());
+// app.use("/admin", admin);   // replaces `new Elysia({ prefix: "/admin" })`
+// app.listen(3000);

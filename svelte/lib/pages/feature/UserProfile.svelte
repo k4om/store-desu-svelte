@@ -1,6 +1,6 @@
 
 <script lang="ts">
-  import { api, apiState, userQuery } from "$lib/api.svelte";
+  import { api, apiState, userQuery } from "$lib/api.svelte.ts";
   import Button from "$lib/components/input/Button.svelte";
   import Input from "$lib/components/input/Input.svelte";
 
@@ -33,7 +33,7 @@
 </script>
 
 <svelte:head>
-  <title>{user.firstName}'s Profile - SenpaiStore'</title>
+  <title>{user?.firstName ? `${user.firstName}'s'` : "User"} Profile - SenpaiStore'</title>
 </svelte:head>
 
 <main>

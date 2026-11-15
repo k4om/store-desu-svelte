@@ -1,13 +1,18 @@
-import Elysia, { t, type Static } from "elysia";
+import { Router } from "express";
+import { Type as t, type Static } from "@sinclair/typebox";
+import argon2 from "argon2";
 
-import { userJWT } from "../jwt.ts";
-import { authCookie, roleBasedAccessLimiter, Unauthorized } from "../auth.ts";
+import {
+  AUTH_COOKIE,
+  authCookieOptions,
+  requireRole,
+  signToken,
+} from "../auth.ts";
+import { validate } from "../validate.ts";
 import { userdb } from "../db/userdb.ts";
 import { transactiondb } from "../db/transactiondb.ts";
-import { transactionItemdb } from "../db/transactionitemdb.ts";
 import { DBError } from "../db/core.ts";
 import { productdb } from "../db/productdb.ts";
-import argon2 from "argon2";
 
 export interface User {
   id: number;
@@ -40,162 +45,124 @@ const createTransactionBody = t.Object({
   ),
 });
 
-const api = new Elysia({ prefix: "/me" })
-  .use(userJWT)
-  .use(roleBasedAccessLimiter)
-  .get(
-    "/",
-    async ({ userjwt, cookie: { auth }, status }) => {
-      const profile = auth.value && (await userjwt.verify(auth.value));
-      if (!profile) return status(401, Unauthorized);
+const api = Router();
 
-      const user = await userdb.getBy("id", profile.id);
-      if (user !== null) {
-        const { id, email, firstName, lastName, role } = user;
-        return {
-          message: "OK",
-          data: { id, email, firstName, lastName, role } satisfies User,
-        };
-      }
+// Every route here requires a logged-in user. requireRole verifies the cookie,
+// loads the user from the DB, and sets req.user (without pwhash), which replaces
+// the manual `userjwt.verify(auth.value)` calls in each Elysia handler.
+api.use(requireRole("user"));
 
-      return { message: "Not Found" };
-    },
-    { role: "user", cookie: authCookie },
-  )
-  .put(
-    "/",
-    async ({ userjwt, body, cookie: { auth }, status }) => {
-      const profile = auth.value && (await userjwt.verify(auth.value));
-      if (!profile) return status(401, Unauthorized);
+api.get("/", (req, res) => {
+  const { id, email, firstName, lastName, role } = req.user!;
 
-      const email = body.email?.trim().toLowerCase();
-      const firstName = body.firstName?.trim();
-      const lastName = body.lastName?.trim() || undefined;
-      const pwhash =
-      body.password !== undefined
-        ? await argon2.hash(body.password)
-        : undefined;
+  res.json({
+    message: "OK",
+    data: { id, email, firstName, lastName, role } satisfies User,
+  });
+});
 
-      if (email) {
-        const existing = await userdb.getBy("email", email);
+api.put("/", validate({ body: updateProfileBody }), async (req, res) => {
+  const profile = req.user!;
+  const body = req.body as Static<typeof updateProfileBody>;
 
-        if (existing && existing.id !== profile.id) {
-          return status(409, Errors.emailTaken);
-        }
-      }
+  const email = body.email?.trim().toLowerCase();
+  const firstName = body.firstName?.trim();
+  const lastName = body.lastName?.trim() || undefined;
+  const pwhash =
+    body.password !== undefined ? await argon2.hash(body.password) : undefined;
 
-      const updated = await userdb.update({
-        id: profile.id,
-        ...(email !== undefined && { email }),
-        ...(firstName !== undefined && { firstName }),
-      ...(pwhash !== undefined && { pwhash }),
-        ...(body.lastName !== undefined && {
-          lastName: lastName || undefined,
-        }),
-      });
+  if (email) {
+    const existing = await userdb.getBy("email", email);
 
-      if (updated instanceof DBError) {
-        return status(500, Errors.updateFailed);
-      }
+    if (existing && existing.id !== profile.id) {
+      return res.status(409).json(Errors.emailTaken);
+    }
+  }
 
-      const {
-        id,
-        email: updatedEmail,
-        firstName: updatedFirstName,
-        lastName: updatedLastName,
-        role,
-      } = updated;
+  const updated = await userdb.update({
+    id: profile.id,
+    ...(email !== undefined && { email }),
+    ...(firstName !== undefined && { firstName }),
+    ...(pwhash !== undefined && { pwhash }),
+    ...(body.lastName !== undefined && {
+      lastName: lastName || undefined,
+    }),
+  });
 
-      const publicUser = {
-        id,
-        email: updatedEmail,
-        firstName: updatedFirstName,
-        lastName: updatedLastName,
-        role,
-      } satisfies User;
+  if (updated instanceof DBError) {
+    return res.status(500).json(Errors.updateFailed);
+  }
 
-      // Refresh JWT with updated user information.
-      auth.value = await userjwt.sign(publicUser);
+  const publicUser = {
+    id: updated.id,
+    email: updated.email,
+    firstName: updated.firstName,
+    lastName: updated.lastName,
+    role: updated.role,
+  } satisfies User;
 
-      return {
-        message: "OK",
-        data: publicUser,
-      };
-    },
-    {
-      role: "user",
-      body: updateProfileBody,
-      cookie: authCookie,
-    },
-  )
-  .get(
-    "/transaction",
-    async ({ userjwt, cookie: { auth }, status }) => {
-      const profile = auth.value && (await userjwt.verify(auth.value));
-      if (!profile) return status(401, Unauthorized);
+  // Refresh JWT with updated user information.
+  res.cookie(AUTH_COOKIE, await signToken(publicUser), authCookieOptions);
 
-      return {
-        message: "OK",
-        data: await transactiondb.wrapMany(
-          await transactiondb.getAllBy("buyerId", profile.id, {
-            sort: { by: "id", order: "DESC" },
-          }),
-        ),
-      };
-    },
-    { role: "user", cookie: authCookie },
-  )
-  .post(
-    "/transaction",
-    async ({ userjwt, body, cookie: { auth }, status }) => {
-      const profile = auth.value && (await userjwt.verify(auth.value));
-      if (!profile) return status(401, Unauthorized);
+  res.json({ message: "OK", data: publicUser });
+});
 
-      const items = await Promise.all(
-        body.items.map(async ({ productId, quantity }) => {
-          const product = await productdb.getBy("id", productId);
+api.get("/transaction", async (req, res) => {
+  res.json({
+    message: "OK",
+    data: await transactiondb.wrapMany(
+      await transactiondb.getAllBy("buyerId", req.user!.id, {
+        sort: { by: "id", order: "DESC" },
+      }),
+    ),
+  });
+});
 
-          if (!product) return null;
+api.post(
+  "/transaction",
+  validate({ body: createTransactionBody }),
+  async (req, res) => {
+    const body = req.body as Static<typeof createTransactionBody>;
 
-          return {
-            productId,
-            quantity,
-            price: product.price,
-          };
-        }),
-      );
+    const items = await Promise.all(
+      body.items.map(async ({ productId, quantity }) => {
+        const product = await productdb.getBy("id", productId);
 
-      if (items.some((item) => item === null)) {
-        return status(400, { message: "Invalid product" });
-      }
+        if (!product) return null;
 
-      const validItems = items.filter(
-        (item): item is NonNullable<typeof item> => item !== null,
-      );
+        return { productId, quantity, price: product.price };
+      }),
+    );
 
-      const created = await transactiondb.create({
-        buyerId: profile.id,
-        items: validItems,
-      });
+    if (items.some((item) => item === null)) {
+      return res.status(400).json({ message: "Invalid product" });
+    }
 
-      if (created instanceof DBError) {
-        return status(500, Errors.createTransactionFailed);
-      }
+    const validItems = items.filter(
+      (item): item is NonNullable<typeof item> => item !== null,
+    );
 
-      return status(201, { message: "OK", data: created });
-    },
-    { role: "user", body: createTransactionBody, cookie: authCookie },
-  )
-  .delete(
-    "/account",
-    async ({ userjwt, cookie: { auth }, status }) => {
-      const profile = auth.value && (await userjwt.verify(auth.value));
-      if (!profile) return status(401, Unauthorized);
+    const created = await transactiondb.create({
+      buyerId: req.user!.id,
+      items: validItems,
+    });
 
-      userdb.delete(profile.id);
-      return { message: "OK" };
-    },
-    { role: "user", cookie: authCookie },
-  );
+    if (created instanceof DBError) {
+      return res.status(500).json(Errors.createTransactionFailed);
+    }
+
+    res.status(201).json({ message: "OK", data: created });
+  },
+);
+
+api.delete("/account", async (req, res) => {
+  // The Elysia version didn't await this, so failures were silently ignored.
+  await userdb.delete(req.user!.id);
+
+  res.json({ message: "OK" });
+});
 
 export default api;
+
+/* ------------------------------ Usage (app.ts) ------------------------------ */
+// app.use("/me", userRoutes);

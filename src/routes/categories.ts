@@ -1,10 +1,10 @@
-import Elysia, { t } from "elysia";
+import { Router } from "express";
+import { Type as t } from "@sinclair/typebox";
 
 import { categorydb } from "../db/categorydb.ts";
-import { authCookie, roleBasedAccessLimiter, Unauthorized } from "../auth.ts";
+import { requireRole } from "../auth.ts";
+import { validate } from "../validate.ts";
 import { DBError } from "../db/core.ts";
-
-const SESSION_MAX_AGE = 7 * 24 * 60 * 60; // seconds
 
 const Errors = {
   nameTaken: { message: "Name already registered" },
@@ -22,82 +22,88 @@ const mutateBody = t.Object({
 
 const ok = (data?: unknown) => ({ message: "OK", data });
 
-const api = new Elysia({ prefix: "/category" })
-  .use(roleBasedAccessLimiter)
-  .post(
-    "/",
-    async ({ body, status }) => {
-      const created = await categorydb.create({
-        label: body.label,
-        desc: body.desc,
-      });
+const api = Router();
 
-      if (created instanceof DBError) {
-        return created.code === "ALREADY_EXISTS"
-          ? status(409, Errors.nameTaken)
-          : status(500, Errors.createFailed);
-      }
+api.post(
+  "/",
+  requireRole("admin"),
+  validate({ body: mutateBody }),
+  async (req, res) => {
+    const body = req.body as { label: string; desc?: string };
 
-      return ok(created);
-    },
-    { role: "admin", body: mutateBody, cookie: authCookie },
-  )
-  .put(
-    "/:id",
-    async ({ body, params, status }) => {
-      const original = await categorydb.getBy("id", params.id);
-      if (!original) {
-        return status(409, Errors.notFound);
-      }
+    const created = await categorydb.create({
+      label: body.label,
+      desc: body.desc,
+    });
 
-      const updated = await categorydb.update({
-        ...body,
-        id: original.id,
-      });
+    if (created instanceof DBError) {
+      return created.code === "ALREADY_EXISTS"
+        ? res.status(409).json(Errors.nameTaken)
+        : res.status(500).json(Errors.createFailed);
+    }
 
-      if (updated instanceof DBError) {
-        return updated.code === "NOT_FOUND"
-          ? status(409, Errors.notFound)
-          : status(500, Errors.createFailed);
-      }
+    res.json(ok(created));
+  },
+);
 
-      return ok(updated);
-    },
-    {
-      role: "admin",
-      body: mutateBody,
-      params: idParams,
-      cookie: authCookie,
-    },
-  )
-  .delete(
-    "/:id",
-    async ({ params, status }) => {
-      const original = await categorydb.getBy("id", params.id);
-      if (!original) {
-        return status(409, Errors.notFound);
-      }
+api.put(
+  "/:id",
+  requireRole("admin"),
+  validate({ params: idParams, body: mutateBody }),
+  async (req, res) => {
+    const id = Number(req.params.id);
 
-      await categorydb.delete(original.id);
+    const original = await categorydb.getBy("id", id);
+    if (!original) {
+      return res.status(409).json(Errors.notFound);
+    }
 
-      return ok();
-    },
-    { role: "admin", params: idParams, cookie: authCookie },
-  )
-  .get(
-    "/:id",
-    async ({ params, status }) => {
-      const data = await categorydb.getBy("id", params.id);
-      if (!data) {
-        return status(409, Errors.notFound);
-      }
+    const updated = await categorydb.update({
+      ...req.body,
+      id: original.id,
+    });
 
-      return ok(data);
-    },
-    { params: idParams, cookie: authCookie },
-  )
-  .get("/", async () => ok(await categorydb.getAll()), {
-    cookie: authCookie,
-  });
+    if (updated instanceof DBError) {
+      return updated.code === "NOT_FOUND"
+        ? res.status(409).json(Errors.notFound)
+        : res.status(500).json(Errors.createFailed);
+    }
+
+    res.json(ok(updated));
+  },
+);
+
+api.delete(
+  "/:id",
+  requireRole("admin"),
+  validate({ params: idParams }),
+  async (req, res) => {
+    const original = await categorydb.getBy("id", Number(req.params.id));
+    if (!original) {
+      return res.status(409).json(Errors.notFound);
+    }
+
+    await categorydb.delete(original.id);
+
+    res.json(ok());
+  },
+);
+
+// Public routes (no role check, same as the Elysia version).
+api.get("/:id", validate({ params: idParams }), async (req, res) => {
+  const data = await categorydb.getBy("id", Number(req.params.id));
+  if (!data) {
+    return res.status(409).json(Errors.notFound);
+  }
+
+  res.json(ok(data));
+});
+
+api.get("/", async (_req, res) => {
+  res.json(ok(await categorydb.getAll()));
+});
 
 export default api;
+
+/* ------------------------------ Usage (app.ts) ------------------------------ */
+// app.use("/category", categoryRoutes);

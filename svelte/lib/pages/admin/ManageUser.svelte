@@ -25,7 +25,7 @@
   async function handleSubmit(event: SubmitEvent) {
     event.preventDefault();
 
-    const isEditingSelf = editedUser.id === currentUser.id;
+    const isEditingSelf = editedUser.id === currentUser?.id;
 
     const payload = {
       firstName,
