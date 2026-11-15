@@ -1,4 +1,4 @@
-import { t, type Static } from "elysia";
+import { Type as t, type Static } from "@sinclair/typebox";
 import { defineTable, col } from "./Database.ts";
 import { DBError } from "./core.ts";
 import {

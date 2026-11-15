@@ -1,4 +1,4 @@
-import { t } from "elysia";
+import { Type as t } from "@sinclair/typebox";
 import type { Static, TObject, TOptional, TSchema } from "@sinclair/typebox";
 import { DBError, pool } from "./core.ts";
 import type { PoolClient } from "pg";

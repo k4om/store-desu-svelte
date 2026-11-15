@@ -1,5 +1,5 @@
-import { t } from "elysia";
-import { defineTable, col, type InferEntity } from "./Database.ts";
+import { Type as t, type Static } from "@sinclair/typebox";
+import { defineTable, col } from "./Database.ts";
 
 export const userdb = defineTable({
   table: "users",
@@ -14,5 +14,5 @@ export const userdb = defineTable({
   },
 });
 
-export type User = InferEntity<typeof userdb>;
+export type User = Static<typeof userdb.schema.entity>;
 export type userid = User["id"];
