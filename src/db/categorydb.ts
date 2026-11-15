@@ -1,5 +1,5 @@
-import { t } from "elysia";
-import { defineTable, col, type InferEntity } from "./Database.ts";
+import { Type as t, type Static } from "@sinclair/typebox";
+import { defineTable, col } from "./Database.ts";
 
 export const categorydb = defineTable({
   table: "categories",
@@ -11,4 +11,5 @@ export const categorydb = defineTable({
   },
 });
 
-export type Category = InferEntity<typeof categorydb>;
+export type Category = Static<typeof categorydb.schema.entity>;
+export type categoryid = Category["id"];
