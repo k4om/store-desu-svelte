@@ -4,15 +4,18 @@
   "description": "",
   "main": "src/production.ts",
   "scripts": {
+    "dev": "npm run node:dev",
     "node:dev": "vite",
     "bun:dev": "bun --bun vite",
+    "build": "npm run node:build",
     "node:build": "vite build",
     "bun:build": "bun --bun vite build",
+    "preview": "npm run node:preview",
     "node:preview": "vite preview",
     "bun:preview": "bun --bun vite preview",
-    "start": "npm run start:node",
-    "bun:start": "NODE_ENV=production bun src/production.ts",
-    "node:start": "NODE_ENV=production node --env-file=.env src/production.ts"
+    "start": "npm run node:start",
+    "node:start": "NODE_ENV=production node --env-file=.env src/production.ts",
+    "bun:start": "NODE_ENV=production bun src/production.ts"
   },
   "keywords": [],
   "author": "",

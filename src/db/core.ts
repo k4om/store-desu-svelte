@@ -1,11 +1,10 @@
 import { Pool } from "pg";
 
 export class DBError extends Error {
-  constructor(
-    public readonly code: "NOT_FOUND" | "ALREADY_EXISTS" | "DATABASE_ERROR" | "a",
-  ) {
-    super(code);
-    this.name = "DatabaseError";
+  readonly code: "NOT_FOUND" | "ALREADY_EXISTS" | "DATABASE_ERROR";
+  constructor(code: DBError["code"], message?: string) {
+    super(message);
+    this.code = code;
   }
 
   public static NotFound = new DBError("NOT_FOUND");
