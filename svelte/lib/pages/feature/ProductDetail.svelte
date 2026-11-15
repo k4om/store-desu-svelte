@@ -2,6 +2,7 @@
   import { apiState, productsQuery } from "$lib/api.svelte";
   import { routes } from "$lib/routes.svelte";
   import { link } from "@milizt/runeway";
+  import Button from "$lib/components/input/Button.svelte";
 
   const productId = $derived(routes.match ? Number((routes.match.params as { id: string }).id) : 0);
   const product = $derived(apiState.products.find((p) => p.id === productId));
@@ -38,133 +39,155 @@
   </title>
 </svelte:head>
 
-<main class="page">
-  {#if productsQuery.loading}
-    <div class="message">Loading product...</div>
-  {:else if !product}
-    <div class="message">
-      <h2>Product not found</h2>
-      <p>This product doesn't exist or may have been removed.</p>
-      <a href="/category/all" use:link>Back to products</a>
-    </div>
-  {:else}
-    <nav class="breadcrumb">
-      <a href="/" use:link>Home</a>
-      <span>/</span>
-      <a href="/category/all" use:link>Products</a>
-      <span>/</span>
-      <a href={`/category/${product.categoryId}`} use:link>
-        {category?.label ?? "Category"}
-      </a>
-      <span>/</span>
-      <span>{product.label}</span>
-    </nav>
+<main>
+  <div class="product-container">
+    {#if productsQuery.loading}
+      <div class="panel message">Loading product...</div>
+    {:else if !product}
+      <div class="panel message">
+        <h2>Product not found</h2>
+        <p>This product doesn't exist or may have been removed.</p>
+        <a href="/category/all" use:link>Back to products</a>
+      </div>
+    {:else}
+      <nav class="breadcrumb" aria-label="Breadcrumb">
+        <a href="/" use:link>Home</a>
+        <span aria-hidden="true">/</span>
+        <a href="/category/all" use:link>Products</a>
+        <span aria-hidden="true">/</span>
+        <a href={`/category/${product.categoryId}`} use:link>
+          {category?.label ?? "Category"}
+        </a>
+        <span aria-hidden="true">/</span>
+        <span class="current">{product.label}</span>
+      </nav>
 
-    <section class="product">
-      <div class="product-visual">
+      <section class="panel product">
         <div class="image-placeholder">
           <span>◇</span>
           <p>No product image available</p>
         </div>
-      </div>
 
-      <div class="product-info">
-        <span class="category">
-          {category?.label ?? "Uncategorized"}
-        </span>
+        <div class="product-info">
+          <span class="category">
+            {category?.label ?? "Uncategorized"}
+          </span>
 
-        <h1>{product.label}</h1>
+          <h1>{product.label}</h1>
 
-        <div class="price">{formatPrice(product.price)}</div>
+          <div class="price">{formatPrice(product.price)}</div>
 
-        <p class="description">
-          {product.desc || "No description available."}
-        </p>
+          <p class="description">
+            {product.desc || "No description available."}
+          </p>
 
-        <hr />
+          <div class="stock">
+            <span
+              class="stock-dot"
+              class:available={product.stock > 0}
+              class:unavailable={product.stock <= 0}
+            ></span>
 
-        <div class="stock">
-          <span
-            class="stock-dot"
-            class:available={product.stock > 0}
-            class:unavailable={product.stock <= 0}
-          ></span>
+            {#if product.stock > 0}
+              {product.stock} items available
+            {:else}
+              Out of stock
+            {/if}
+          </div>
 
           {#if product.stock > 0}
-            {product.stock} items available
-          {:else}
-            Out of stock
-          {/if}
-        </div>
+            <div class="purchase">
+              <div class="quantity">
+                <button
+                  type="button"
+                  onclick={() => (quantity = Math.max(1, quantity - 1))}
+                  disabled={quantity <= 1}
+                  aria-label="Decrease quantity">−</button
+                >
 
-        {#if product.stock > 0}
-          <div class="purchase">
-            <div class="quantity">
-              <button
-                onclick={() => (quantity = Math.max(1, quantity - 1))}
-                disabled={quantity <= 1}
-                aria-label="Decrease quantity">−</button
-              >
+                <span>{quantity}</span>
 
-              <span>{quantity}</span>
+                <button
+                  type="button"
+                  onclick={() =>
+                    (quantity = Math.min(product.stock, quantity + 1))}
+                  disabled={quantity >= product.stock}
+                  aria-label="Increase quantity">+</button
+                >
+              </div>
 
-              <button
-                onclick={() =>
-                  (quantity = Math.min(product.stock, quantity + 1))}
-                disabled={quantity >= product.stock}
-                aria-label="Increase quantity">+</button
-              >
+              <div class="cart-action">
+                <Button variant="primary" onclick={addToCart}>
+                  {added ? "Added ✓" : "Add to cart"}
+                </Button>
+              </div>
             </div>
+          {/if}
 
-            <button class="cart-button" onclick={addToCart}>
-              {added ? "Added ✓" : "Add to cart"}
-            </button>
+          <div class="product-meta">
+            <p>Product ID: <strong>{product.id}</strong></p>
+            <p>Category ID: <strong>{product.categoryId}</strong></p>
           </div>
-        {/if}
-
-        <div class="product-meta">
-          <p>Product ID: <strong>{product.id}</strong></p>
-          <p>Category ID: <strong>{product.categoryId}</strong></p>
         </div>
-      </div>
-    </section>
-  {/if}
+      </section>
+    {/if}
+  </div>
 </main>
 
 <style>
-  :global(*) {
-    box-sizing: border-box;
+  main {
+    flex: 1;
+    overflow: auto;
+    padding: 1.5rem 1.75rem;
   }
 
-  .page {
-    max-width: 1150px;
-    margin: auto;
-    padding: 36px 24px;
-    color: var(--color, #222);
+  .product-container {
+    width: 100%;
+    max-width: 64rem;
+    margin-inline: auto;
   }
 
+  /* Same frosted card as the profile form */
+  .panel {
+    padding: 1.5rem;
+    border-radius: 0.5rem;
+    background-color: rgb(255 255 255 / 65%);
+    color: #000;
+    box-shadow: 0 25px 50px -12px rgb(0 0 0 / 25%);
+    backdrop-filter: blur(16px);
+  }
+
+  /* Breadcrumb sits on the bare gradient, so use the same dark tones as the profile header */
   .breadcrumb {
     display: flex;
     flex-wrap: wrap;
-    gap: 10px;
-    margin-bottom: 36px;
-    font-size: 13px;
-    color: #999;
+    gap: 0.5rem;
+    margin-bottom: 1rem;
+    color: #374151;
+    font-size: 0.875rem;
+    line-height: 1.25rem;
   }
 
   .breadcrumb a {
     color: inherit;
-    text-decoration: none;
+    text-decoration: underline;
+    text-underline-offset: 3px;
   }
 
   .breadcrumb a:hover {
-    color: var(--accent, #555);
+    color: #111827;
+  }
+
+  .breadcrumb .current {
+    color: #111827;
+    font-weight: 600;
   }
 
   .product {
     display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 56px;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    gap: 2rem;
+    align-items: start;
   }
 
   .image-placeholder {
@@ -172,142 +195,166 @@
     flex-direction: column;
     align-items: center;
     justify-content: center;
+    gap: 0.25rem;
     aspect-ratio: 1;
-    border-radius: 12px;
-    background: var(--surface, #f2f2f2);
-    color: #999;
+    border: 1px dashed #94a3b8;
+    border-radius: 0.5rem;
+    background-color: rgb(255 255 255 / 50%);
+    color: #475569;
   }
 
   .image-placeholder span {
-    font-size: 64px;
+    font-size: 4rem;
+    line-height: 1;
   }
 
   .image-placeholder p {
-    font-size: 13px;
-  }
-
-  .product-info {
-    padding-top: 12px;
+    margin: 0;
+    font-size: 0.875rem;
   }
 
   .category {
-    color: #888;
-    font-size: 13px;
+    display: inline-block;
+    padding: 0.125rem 0.75rem;
+    border-radius: 999px;
+    background-color: #e2e8f0;
+    color: #1e293b;
+    font-size: 0.875rem;
+    font-weight: 600;
   }
 
   h1 {
-    margin: 12px 0;
-    font-size: clamp(28px, 4vw, 38px);
-  }
-
-  .price {
-    margin: 24px 0;
-    font-size: 28px;
+    margin: 0.75rem 0 0.25rem;
+    color: #111827;
+    font-size: 1.75rem;
+    line-height: 2.25rem;
     font-weight: 700;
   }
 
-  .description {
-    color: #888;
-    font-size: 14px;
-    line-height: 1.8;
+  .price {
+    margin: 0.5rem 0 1rem;
+    color: #111827;
+    font-size: 1.75rem;
+    font-weight: 800;
   }
 
-  hr {
-    margin: 28px 0;
-    border: 0;
-    border-top: 1px solid #ddd;
+  .description {
+    margin: 0;
+    color: #374151;
+    font-size: 0.9375rem;
+    line-height: 1.7;
   }
 
   .stock {
     display: flex;
     align-items: center;
-    gap: 9px;
-    font-size: 13px;
+    gap: 0.5rem;
+    margin-top: 1.25rem;
+    padding-top: 1.25rem;
+    border-top: 1px solid #e2e8f0;
+    color: #111827;
+    font-size: 0.875rem;
+    font-weight: 600;
   }
 
   .stock-dot {
-    width: 9px;
-    height: 9px;
+    width: 0.625rem;
+    height: 0.625rem;
     border-radius: 50%;
   }
 
   .available {
-    background: #36a66b;
+    background: #16a34a;
   }
 
   .unavailable {
-    background: #d44;
+    background: #dc2626;
   }
 
   .purchase {
     display: flex;
-    gap: 12px;
-    margin-top: 24px;
+    gap: 0.75rem;
+    margin-top: 1.25rem;
   }
 
   .quantity {
     display: flex;
     align-items: center;
-    border: 1px solid #ddd;
-    border-radius: 8px;
+    border: 1px solid #94a3b8;
+    border-radius: 0.5rem;
+    background-color: rgb(255 255 255 / 70%);
+    color: #111827;
+    font-weight: 600;
   }
 
   .quantity button {
-    width: 40px;
-    height: 44px;
+    width: 2.5rem;
+    height: 2.5rem;
     border: 0;
+    border-radius: 0.5rem;
     background: transparent;
+    color: inherit;
+    font-size: 1.25rem;
     cursor: pointer;
   }
 
+  .quantity button:hover:not(:disabled) {
+    background-color: #e2e8f0;
+  }
+
   .quantity button:disabled {
-    color: #bbb;
+    opacity: 0.35;
     cursor: not-allowed;
   }
 
   .quantity span {
-    min-width: 24px;
+    min-width: 2rem;
     text-align: center;
   }
 
-  .cart-button {
+  .cart-action {
     flex: 1;
-    min-height: 46px;
-    border: 0;
-    border-radius: 8px;
-    background: var(--accent, #222);
-    color: white;
-    cursor: pointer;
-    font-weight: 600;
-  }
-
-  .cart-button:hover {
-    opacity: 0.85;
   }
 
   .product-meta {
-    margin-top: 32px;
-    color: #999;
-    font-size: 12px;
+    margin-top: 1.5rem;
+    padding-top: 1.25rem;
+    border-top: 1px solid #e2e8f0;
+    color: #4b5563;
+    font-size: 0.8125rem;
+  }
+
+  .product-meta p {
+    margin: 0.125rem 0;
+  }
+
+  .product-meta strong {
+    color: #111827;
   }
 
   .message {
-    padding: 80px 20px;
+    padding: 3rem 1.5rem;
     text-align: center;
+    color: #111827;
+  }
+
+  .message p {
+    color: #374151;
   }
 
   .message a {
-    color: inherit;
+    color: #1e3a8a;
+    font-weight: 600;
   }
 
   @media (max-width: 768px) {
-    .product {
-      grid-template-columns: 1fr;
-      gap: 28px;
+    main {
+      padding: 1rem;
     }
 
-    .page {
-      padding: 24px 16px;
+    .product {
+      grid-template-columns: 1fr;
+      gap: 1.5rem;
     }
   }
 </style>
