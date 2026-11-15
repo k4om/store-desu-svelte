@@ -1,0 +1,26 @@
+{
+  "compilerOptions": {
+    "allowJs": true,
+    "checkJs": false,
+    "noEmit": true,
+    "target": "es2025",
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "allowImportingTsExtensions": true,
+    "verbatimModuleSyntax": true,
+    "isolatedModules": true,
+    "skipLibCheck": true,
+    "paths": {
+      "$lib/*": ["./svelte/lib/*"],
+      "$server/*": ["./src/*"]
+    }
+  },
+  "exclude": [
+    "dist/",
+    "node_modules/"
+  ],
+  "include": [
+    "svelte/**/*",
+    "vite.config.ts"
+  ]
+}

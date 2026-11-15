@@ -1,0 +1,56 @@
+@import "tailwindcss";
+
+@theme {
+  --color-navy: #1e3a8a;
+  --color-navy-dark: #172b66;
+  --color-active: #cfe0f4;
+
+  --color-primary: var(--color-navy);
+  --color-primary-hover: var(--color-navy-dark);
+
+  --color-secondary: #6b7280;
+  --color-secondary-hover: #4b5563;
+
+  --color-danger: #dc2626;
+  --color-danger-hover: #b91c1c;
+
+  --color-nav-surface: #f8fafc22;
+
+  --breakpoint-xxs: 300px;
+}
+
+body {
+  --tw-gradient-position: to bottom left;
+  min-height: 100vh;
+  background-image: linear-gradient(
+    var(--tw-gradient-position),
+    var(--color-slate-200),
+    var(--color-slate-500),
+    var(--color-blue-950)
+  );
+  /* background-image: linear-gradient(
+    var(--tw-gradient-position),
+    var(--color-gray-600),
+    var(--color-gray-950),
+    var(--color-black)
+  ); */
+  color: var(--color-slate-800);
+}
+
+@supports (background-image: linear-gradient(in lab, red, red)) {
+  body {
+    --tw-gradient-position: to bottom left in oklab;
+  }
+}
+
+.underlined-link {
+  text-decoration: underline;
+}
+
+.underlined-link:hover {
+  color: var(--color-primary-hover);
+}
+
+.scroll-lock {
+  overflow: hidden;
+}
