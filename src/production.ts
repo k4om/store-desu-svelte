@@ -4,7 +4,7 @@ import fs from "node:fs";
 import { api } from "./index.ts";
 
 const PORT = Number(process.env.PORT ?? 3000);
-const HOST = process.env.HOST ?? "0.0.0.0";
+const HOST = process.env.HOST ?? "localhost";
 
 // dist/ lives next to src/ (vite outDir is "../dist" from svelte/)
 const distDir = path.resolve(import.meta.dirname, "../dist");

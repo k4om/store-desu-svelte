@@ -14,8 +14,8 @@
     "node:preview": "vite preview",
     "bun:preview": "bun --bun vite preview",
     "start": "npm run node:start",
-    "node:start": "NODE_ENV=production node --env-file=.env src/production.ts",
-    "bun:start": "NODE_ENV=production bun src/production.ts"
+    "node:start": "node --env-file=.env src/production.ts",
+    "bun:start": "bun src/production.ts"
   },
   "keywords": [],
   "author": "",
